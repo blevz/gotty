@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/google/uuid"
 	"github.com/pkg/errors"
 )
 
@@ -16,7 +17,7 @@ import (
 type WebTTY struct {
 	// PTY downstream, which is usually a connection to browser
 	downstreamWriter  Downstream
-	downstreamReaders []Downstream
+	downstreamReaders map[string]Downstream
 
 	// PTY upstream, usually a local tty
 	upstream Upstream
@@ -39,7 +40,7 @@ type WebTTY struct {
 func New(downstream Downstream, upstream Upstream, options ...Option) (*WebTTY, error) {
 	wt := &WebTTY{
 		downstreamWriter:  downstream,
-		downstreamReaders: []Downstream{downstream},
+		downstreamReaders: map[string]Downstream{"original": downstream},
 		upstream:          upstream,
 
 		permitWrite: false,
@@ -56,10 +57,16 @@ func New(downstream Downstream, upstream Upstream, options ...Option) (*WebTTY, 
 	return wt, nil
 }
 
-func (wt *WebTTY) addDownstreamReader(downstream Downstream) {
+func (wt *WebTTY) addDownstreamReader(downstream Downstream) string {
 	wt.writeMutex.Lock()
 	defer wt.writeMutex.Unlock()
-	wt.downstreamReaders = append(wt.downstreamReaders, downstream)
+	uid := uuid.New()
+	wt.downstreamReaders[uid.String()] = downstream
+	return uid.String()
+}
+
+func (wt *WebTTY) removeReader(uid string) {
+	delete(wt.downstreamReaders, uid)
 }
 
 func (wt *WebTTY) AddDownstreamReader(ctx context.Context, downstream Downstream) error {
@@ -67,11 +74,12 @@ func (wt *WebTTY) AddDownstreamReader(ctx context.Context, downstream Downstream
 	if err != nil {
 		return errors.Wrapf(err, "failed to send initializing message")
 	}
-	wt.addDownstreamReader(downstream)
+	uid := wt.addDownstreamReader(downstream)
 	select {
 	case <-ctx.Done():
 		err = ctx.Err()
 	}
+	wt.removeReader(uid)
 
 	return err
 }
@@ -172,10 +180,7 @@ func (wt *WebTTY) masterWrite(data []byte) error {
 	defer wt.writeMutex.Unlock()
 	for i, downstreamReader := range wt.downstreamReaders {
 		fmt.Printf("Sending %s to %d\n", data, i)
-		_, err := downstreamReader.Write(data)
-		if err != nil {
-			return errors.Wrapf(err, "failed to write to master")
-		}
+		downstreamReader.Write(data)
 	}
 
 	return nil
@@ -194,6 +199,11 @@ func (wt *WebTTY) handleMasterReadEvent(data []byte) error {
 		}
 
 		if len(data) <= 1 {
+			return nil
+		}
+
+		// This condition causes the write to have to wait for a reader
+		if len(wt.downstreamReaders) < 2 {
 			return nil
 		}
 
