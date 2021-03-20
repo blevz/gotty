@@ -5,14 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"sync/atomic"
 
 	"github.com/gorilla/websocket"
 	"github.com/pkg/errors"
 
+	"github.com/blevz/gotty/utils"
 	"github.com/blevz/gotty/webtty"
 )
 
@@ -157,14 +160,28 @@ func (server *Server) processWSConn(ctx context.Context, conn *websocket.Conn) e
 	if server.options.Preferences != nil {
 		opts = append(opts, webtty.WithMasterPreferences(server.options.Preferences))
 	}
-	wsWrap := &wsWrapper{conn}
-	socketWriter := webtty.DownstreamWriterWrapper{Writer: wsWrap}
-	socketReader := webtty.DownstreamReaderWrapper{Reader: wsWrap}
-	opts = append(opts, webtty.WithUpstream(upstream))
-	fileW, err := webtty.GetDownstreamFileWriter()
+	f, err := os.CreateTemp("/tmp/gotty", "cli")
 	if err != nil {
 		return err
 	}
+	timestampedBytestreamWriter := utils.TimestampWriter{Writer: utils.NewLineWriter{Writer: f}}
+	reqWriter := utils.TaggedWriter{
+		Writer: timestampedBytestreamWriter,
+		Tag:    "req",
+	}
+	respWriter := utils.TaggedWriter{
+		Writer: timestampedBytestreamWriter,
+		Tag:    "resp",
+	}
+
+	wsWrap := &wsWrapper{conn}
+	teedWebsocket := io.TeeReader(wsWrap, reqWriter)
+	socketWriter := webtty.DownstreamWriterWrapper{Writer: wsWrap}
+	socketReader := webtty.DownstreamReaderWrapper{Reader: teedWebsocket}
+	opts = append(opts, webtty.WithUpstream(upstream))
+
+	fmt.Println("Writing audit trail in: " + f.Name())
+	fileW := &webtty.DownstreamWriterWrapper{Writer: respWriter}
 	writer := webtty.CoalescingDownstreamWriter{
 		Writers: []webtty.DownstreamWriter{
 			fileW,

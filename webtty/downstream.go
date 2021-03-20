@@ -1,11 +1,7 @@
 package webtty
 
 import (
-	"fmt"
 	"io"
-	"os"
-
-	"github.com/blevz/gotty/utils"
 )
 
 // Downstream represents a PTY sending input and receiving output from the Upstream, usually it's a websocket connection.
@@ -20,17 +16,20 @@ type Downstream interface {
 	DownstreamWriter
 }
 
-func GetDownstreamFileWriter() (DownstreamWriter, error) {
-	f, err := os.CreateTemp("/tmp", "cli")
-	if err != nil {
-		return nil, err
-	}
-	fmt.Println(f.Name())
-	return &DownstreamWriterWrapper{Writer: utils.NewLineWriter{Writer: f}}, nil
-}
-
 type CoalescingDownstreamWriter struct {
 	Writers []DownstreamWriter
+}
+
+type DownstreamWriterWrapper struct {
+	Writer io.Writer
+}
+
+type DownstreamReaderCapture struct {
+	Reader io.Reader
+}
+
+type DownstreamReaderWrapper struct {
+	Reader io.Reader
 }
 
 func (w CoalescingDownstreamWriter) WriteMessage(r ResponseType, data []byte) error {
@@ -43,14 +42,6 @@ func (w CoalescingDownstreamWriter) WriteMessage(r ResponseType, data []byte) er
 	return nil
 }
 
-type DownstreamWriterWrapper struct {
-	Writer io.Writer
-}
-
-type DownstreamReaderWrapper struct {
-	Reader io.Reader
-}
-
 func (d DownstreamReaderWrapper) ReadMessage() (RequestType, []byte, error) {
 	buffer := make([]byte, 1024)
 	n, err := d.Reader.Read(buffer)
@@ -58,7 +49,6 @@ func (d DownstreamReaderWrapper) ReadMessage() (RequestType, []byte, error) {
 		return UnknownInput, nil, ErrDownstreamClosed
 	}
 	t := RequestType(buffer[0])
-	fmt.Println(n)
 	if t == Ping || n < 2 {
 		return t, nil, nil
 	}
