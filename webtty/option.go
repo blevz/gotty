@@ -9,6 +9,36 @@ import (
 // Option is an option for WebTTY.
 type Option func(*WebTTY) error
 
+// WithUpstream sets the upstream tty, usually a local a local command w/ a PTY.
+func WithUpstream(upstream Upstream) Option {
+	return func(wt *WebTTY) error {
+		wt.upstream = upstream
+		return nil
+	}
+}
+
+func WithDownstream(downstream Downstream) Option {
+	return func(wt *WebTTY) error {
+		wt.downstreamReader = downstream
+		wt.downstreamWriter = downstream
+		return nil
+	}
+}
+
+func WithDownstreamReader(downstreamReader DownstreamReader) Option {
+	return func(wt *WebTTY) error {
+		wt.downstreamReader = downstreamReader
+		return nil
+	}
+}
+
+func WithDownstreamWriter(downstreamWriter DownstreamWriter) Option {
+	return func(wt *WebTTY) error {
+		wt.downstreamWriter = downstreamWriter
+		return nil
+	}
+}
+
 // WithPermitWrite sets a WebTTY to accept input from upstreams.
 func WithPermitWrite() Option {
 	return func(wt *WebTTY) error {

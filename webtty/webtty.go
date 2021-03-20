@@ -14,7 +14,8 @@ import (
 // terminal resizing, WebTTY uses an original protocol.
 type WebTTY struct {
 	// PTY downstream, which is usually a connection to browser
-	downstream Downstream
+	downstreamReader DownstreamReader
+	downstreamWriter DownstreamWriter
 	// PTY upstream, usually a local tty
 	upstream Upstream
 
@@ -33,11 +34,8 @@ type WebTTY struct {
 // downstream is a connection to the PTY downstream,
 // typically it's a websocket connection to a client.
 // upstream is usually a local command with a PTY.
-func New(downstream Downstream, upstream Upstream, options ...Option) (*WebTTY, error) {
+func New(options ...Option) (*WebTTY, error) {
 	wt := &WebTTY{
-		downstream: downstream,
-		upstream:   upstream,
-
 		permitWrite: false,
 		columns:     0,
 		rows:        0,
@@ -87,7 +85,7 @@ func (wt *WebTTY) Run(ctx context.Context) error {
 		errs <- func() error {
 			buffer := make([]byte, wt.bufferSize)
 			for {
-				n, err := wt.downstream.Read(buffer)
+				n, err := wt.downstreamReader.Read(buffer)
 				if err != nil {
 					return ErrDownstreamClosed
 				}
@@ -147,7 +145,7 @@ func (wt *WebTTY) masterWrite(data []byte) error {
 	wt.writeMutex.Lock()
 	defer wt.writeMutex.Unlock()
 
-	_, err := wt.downstream.Write(data)
+	_, err := wt.downstreamWriter.Write(data)
 	if err != nil {
 		return errors.Wrapf(err, "failed to write to master")
 	}
