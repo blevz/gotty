@@ -1,13 +1,12 @@
 OUTPUT_DIR = ./builds
 GIT_COMMIT = `git rev-parse HEAD | cut -c1-7`
 VERSION = 2.0.0-alpha.3
-BUILD_OPTIONS = -ldflags "-X main.Version=$(VERSION) -X main.CommitID=$(GIT_COMMIT)"
+BUILD_OPTIONS = 
 
 all: gotty
 
-gotty: gotty.go server/*.go webtty/*.go backend/*.go Makefile asset
-	go build ${BUILD_OPTIONS}
-
+gotty: cmd/gotty/gotty.go server/*.go webtty/*.go backend/*.go Makefile asset
+	GOBIN=bin/ go build -o ./bin ./cmd/... ${BUILD_OPTIONS}
 .PHONY: asset
 asset: server/static/js/gotty-bundle.js server/static/index.html server/static/favicon.png server/static/css/index.css server/static/css/xterm.css server/static/css/xterm_customize.css
 
@@ -18,7 +17,8 @@ all: asset gotty
 clean:
 	rm -rf js/node_modules
 	rm -rf server/static
-	rm -f gotty
+	rm -f bin/gotty
+	rm -f bin/replay
 	
 
 server/static:

@@ -14,7 +14,8 @@ import (
 // terminal resizing, WebTTY uses an original protocol.
 type WebTTY struct {
 	// PTY downstream, which is usually a connection to browser
-	downstream Downstream
+	downstreamReader DownstreamReader
+	downstreamWriter DownstreamWriter
 	// PTY upstream, usually a local tty
 	upstream Upstream
 
@@ -33,11 +34,8 @@ type WebTTY struct {
 // downstream is a connection to the PTY downstream,
 // typically it's a websocket connection to a client.
 // upstream is usually a local command with a PTY.
-func New(downstream Downstream, upstream Upstream, options ...Option) (*WebTTY, error) {
+func New(options ...Option) (*WebTTY, error) {
 	wt := &WebTTY{
-		downstream: downstream,
-		upstream:   upstream,
-
 		permitWrite: false,
 		columns:     0,
 		rows:        0,
@@ -85,14 +83,12 @@ func (wt *WebTTY) Run(ctx context.Context) error {
 
 	go func() {
 		errs <- func() error {
-			buffer := make([]byte, wt.bufferSize)
 			for {
-				n, err := wt.downstream.Read(buffer)
+				reqType, data, err := wt.downstreamReader.ReadMessage()
 				if err != nil {
 					return ErrDownstreamClosed
 				}
-
-				err = wt.handleMasterReadEvent(buffer[:n])
+				err = wt.handleMasterReadEvent(reqType, data)
 				if err != nil {
 					return err
 				}
@@ -110,21 +106,21 @@ func (wt *WebTTY) Run(ctx context.Context) error {
 }
 
 func (wt *WebTTY) sendInitializeMessage() error {
-	err := wt.masterWrite(append([]byte{SetWindowTitle}, wt.windowTitle...))
+	err := wt.masterWrite(SetWindowTitle, wt.windowTitle)
 	if err != nil {
 		return errors.Wrapf(err, "failed to send window title")
 	}
 
 	if wt.reconnect > 0 {
 		reconnect, _ := json.Marshal(wt.reconnect)
-		err := wt.masterWrite(append([]byte{SetReconnect}, reconnect...))
+		err := wt.masterWrite(SetReconnect, reconnect)
 		if err != nil {
 			return errors.Wrapf(err, "failed to set reconnect")
 		}
 	}
 
 	if wt.masterPrefs != nil {
-		err := wt.masterWrite(append([]byte{SetPreferences}, wt.masterPrefs...))
+		err := wt.masterWrite(SetPreferences, wt.masterPrefs)
 		if err != nil {
 			return errors.Wrapf(err, "failed to set preferences")
 		}
@@ -135,7 +131,7 @@ func (wt *WebTTY) sendInitializeMessage() error {
 
 func (wt *WebTTY) handleUpstreamReadEvent(data []byte) error {
 	safeMessage := base64.StdEncoding.EncodeToString(data)
-	err := wt.masterWrite(append([]byte{Output}, []byte(safeMessage)...))
+	err := wt.masterWrite(Output, []byte(safeMessage))
 	if err != nil {
 		return errors.Wrapf(err, "failed to send message to master")
 	}
@@ -143,11 +139,11 @@ func (wt *WebTTY) handleUpstreamReadEvent(data []byte) error {
 	return nil
 }
 
-func (wt *WebTTY) masterWrite(data []byte) error {
+func (wt *WebTTY) masterWrite(r ResponseType, data []byte) error {
 	wt.writeMutex.Lock()
 	defer wt.writeMutex.Unlock()
 
-	_, err := wt.downstream.Write(data)
+	err := wt.downstreamWriter.WriteMessage(r, data)
 	if err != nil {
 		return errors.Wrapf(err, "failed to write to master")
 	}
@@ -155,61 +151,67 @@ func (wt *WebTTY) masterWrite(data []byte) error {
 	return nil
 }
 
-func (wt *WebTTY) handleMasterReadEvent(data []byte) error {
-	if len(data) == 0 {
-		return errors.New("unexpected zero length read from master")
-	}
-
-	switch data[0] {
+func (wt *WebTTY) handleMasterReadEvent(r RequestType, data []byte) error {
+	switch r {
 	case Input:
-		if !wt.permitWrite {
-			return nil
-		}
-
-		if len(data) <= 1 {
-			return nil
-		}
-
-		_, err := wt.upstream.Write(data[1:])
-		if err != nil {
-			return errors.Wrapf(err, "failed to write received data to upstream")
+		if err := wt.handleInput(data); err != nil {
+			return err
 		}
 
 	case Ping:
-		err := wt.masterWrite([]byte{Pong})
+		err := wt.handlePong()
 		if err != nil {
-			return errors.Wrapf(err, "failed to return Pong message to downstream")
+			return err
 		}
 
 	case ResizeTerminal:
-		if wt.columns != 0 && wt.rows != 0 {
-			break
-		}
-
-		if len(data) <= 1 {
-			return errors.New("received malformed remote command for terminal resize: empty payload")
-		}
-
 		var args argResizeTerminal
-		err := json.Unmarshal(data[1:], &args)
+		err := json.Unmarshal(data, &args)
 		if err != nil {
 			return errors.Wrapf(err, "received malformed data for terminal resize")
 		}
-		rows := wt.rows
-		if rows == 0 {
-			rows = int(args.Rows)
+		err = wt.handleResize(args)
+		if err != nil {
+			return err
 		}
-
-		columns := wt.columns
-		if columns == 0 {
-			columns = int(args.Columns)
-		}
-
-		wt.upstream.ResizeTerminal(columns, rows)
 	default:
 		return errors.Errorf("unknown message type `%c`", data[0])
 	}
 
+	return nil
+}
+
+func (wt *WebTTY) handleResize(args argResizeTerminal) error {
+	rows := wt.rows
+	if rows == 0 {
+		rows = int(args.Rows)
+	}
+
+	columns := wt.columns
+	if columns == 0 {
+		columns = int(args.Columns)
+	}
+
+	wt.upstream.ResizeTerminal(columns, rows)
+	return nil
+}
+
+func (wt *WebTTY) handlePong() error {
+	err := wt.masterWrite(Pong, []byte{})
+	if err != nil {
+		return errors.Wrapf(err, "failed to return Pong message to downstream")
+	}
+	return nil
+}
+
+func (wt *WebTTY) handleInput(data []byte) error {
+	if !wt.permitWrite {
+		return nil
+	}
+	_, err := wt.upstream.Write(data)
+	if err != nil {
+		return errors.Wrapf(err, "failed to write received data to upstream")
+	}
 	return nil
 }
 
