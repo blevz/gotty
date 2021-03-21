@@ -180,20 +180,24 @@ func (server *Server) Run(ctx context.Context, options ...RunOption) error {
 	return err
 }
 
-func (server *Server) setupHandlers(ctx context.Context, cancel context.CancelFunc, pathPrefix string, counter *counter) http.Handler {
+func (server *Server) setupStaticHandles(siteMux *http.ServeMux) *http.ServeMux {
 	subFs, err := fs.Sub(f, "static")
 	if err != nil {
 		panic("Oh no")
 	}
-	httpFs := http.FS(subFs)
-	staticFileHandler := http.FileServer(httpFs)
+	staticFileHandler := http.FileServer(http.FS(subFs))
+	siteMux.Handle("/js/", staticFileHandler)
+	siteMux.Handle("/favicon.png", staticFileHandler)
+	siteMux.Handle("/css/", staticFileHandler)
+	return siteMux
 
-	var siteMux = http.NewServeMux()
+}
+
+func (server *Server) setupHandlers(ctx context.Context, cancel context.CancelFunc, pathPrefix string, counter *counter) http.Handler {
+
+	siteMux := http.NewServeMux()
+	server.setupStaticHandles(siteMux)
 	siteMux.HandleFunc(pathPrefix, server.handleIndex)
-	siteMux.Handle(pathPrefix+"js/", http.StripPrefix(pathPrefix, staticFileHandler))
-	siteMux.Handle(pathPrefix+"favicon.png", http.StripPrefix(pathPrefix, staticFileHandler))
-	siteMux.Handle(pathPrefix+"css/", http.StripPrefix(pathPrefix, staticFileHandler))
-
 	siteMux.HandleFunc(pathPrefix+"auth_token.js", server.handleAuthToken)
 	siteMux.HandleFunc(pathPrefix+"config.js", server.handleConfig)
 

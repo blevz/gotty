@@ -5,7 +5,7 @@ BUILD_OPTIONS =
 
 all: gotty
 
-gotty: cmd/gotty/gotty.go server/*.go webtty/*.go backend/*.go Makefile asset
+gotty: cmd/gotty/gotty.go server/*.go webtty/*.go backend/*.go Makefile asset bin
 	GOBIN=bin/ go build -o ./bin ./cmd/... ${BUILD_OPTIONS}
 .PHONY: asset
 asset: server/static/js/gotty-bundle.js server/static/index.html server/static/favicon.png server/static/css/index.css server/static/css/xterm.css server/static/css/xterm_customize.css
@@ -17,9 +17,10 @@ all: asset gotty
 clean:
 	rm -rf js/node_modules
 	rm -rf server/static
-	rm -f bin/gotty
-	rm -f bin/replay
+	rm -fr bin
 	
+bin:
+	mkdir bin
 
 server/static:
 	mkdir server/static
