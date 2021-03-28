@@ -157,8 +157,24 @@ func (server *Server) processWSConn(ctx context.Context, conn *websocket.Conn) e
 	if server.options.Preferences != nil {
 		opts = append(opts, webtty.WithMasterPreferences(server.options.Preferences))
 	}
+	wsWrap := &wsWrapper{conn}
+	socketWriter := webtty.DownstreamWriterWrapper{Writer: wsWrap}
+	socketReader := webtty.DownstreamReaderWrapper{Reader: wsWrap}
+	opts = append(opts, webtty.WithUpstream(upstream))
+	fileW, err := webtty.GetDownstreamFileWriter()
+	if err != nil {
+		return err
+	}
+	writer := webtty.CoalescingDownstreamWriter{
+		Writers: []webtty.DownstreamWriter{
+			fileW,
+			socketWriter,
+		},
+	}
+	opts = append(opts, webtty.WithDownstreamWriter(writer))
+	opts = append(opts, webtty.WithDownstreamReader(socketReader))
 
-	tty, err := webtty.New(&wsWrapper{conn}, upstream, opts...)
+	tty, err := webtty.New(opts...)
 	if err != nil {
 		return errors.Wrapf(err, "failed to create webtty")
 	}

@@ -4,28 +4,32 @@ package webtty
 // which is supposed to be used to the subprotocol of Websockt streams.
 var Protocols = []string{"webtty"}
 
+type RequestType rune
+
 const (
 	// Unknown message type, maybe sent by a bug
-	UnknownInput = '0'
+	UnknownInput RequestType = '0'
 	// User input typically from a keyboard
-	Input = '1'
+	Input RequestType = '1'
 	// Ping to the server
-	Ping = '2'
+	Ping RequestType = '2'
 	// Notify that the browser size has been changed
-	ResizeTerminal = '3'
+	ResizeTerminal RequestType = '3'
 )
+
+type ResponseType rune
 
 const (
 	// Unknown message type, maybe set by a bug
-	UnknownOutput = '0'
+	UnknownOutput ResponseType = '0'
 	// Normal output to the terminal
-	Output = '1'
+	Output ResponseType = '1'
 	// Pong to the browser
-	Pong = '2'
+	Pong ResponseType = '2'
 	// Set window title of the terminal
-	SetWindowTitle = '3'
+	SetWindowTitle ResponseType = '3'
 	// Set terminal preference
-	SetPreferences = '4'
+	SetPreferences ResponseType = '4'
 	// Make terminal to reconnect
-	SetReconnect = '5'
+	SetReconnect ResponseType = '5'
 )
